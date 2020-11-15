@@ -31,6 +31,12 @@ using NUnit.Runner.View;
 using NUnit.Runner.Services;
 
 using Xamarin.Forms;
+using System.Diagnostics;
+using System.IO;
+using System;
+using Xamarin.Essentials;
+using nunit.xamarin.Services;
+using System.Linq;
 
 namespace NUnit.Runner.ViewModel
 {
@@ -43,6 +49,7 @@ namespace NUnit.Runner.ViewModel
 
         public SummaryViewModel()
         {
+            ExportStatus = "Not Exported";
             _testPackage = new TestPackage();
             RunTestsCommand = new Command(async o => await ExecuteTestsAync(), o => !Running);
             ViewAllResultsCommand = new Command(
@@ -51,6 +58,8 @@ namespace NUnit.Runner.ViewModel
             ViewFailedResultsCommand = new Command(
                 async o => await Navigation.PushAsync(new ResultsView(new ResultsViewModel(_results.GetTestResults(), false))),
                 o => !HasResults);
+
+            ExportTestResultsXML = new Command(OnExportResultXml);
         }
 
         private TestOptions options;
@@ -123,6 +132,7 @@ namespace NUnit.Runner.ViewModel
         public ICommand RunTestsCommand { set; get; }
         public ICommand ViewAllResultsCommand { set; get; }
         public ICommand ViewFailedResultsCommand { set; get; }
+        public ICommand ExportTestResultsXML { set; get; }
 
         /// <summary>
         /// Adds an assembly to be tested.
@@ -143,6 +153,9 @@ namespace NUnit.Runner.ViewModel
 
             _resultProcessor = TestResultProcessor.BuildChainOfResponsability(Options);
             await _resultProcessor.Process(summary).ConfigureAwait(false);
+
+            var temp = summary;
+            Debug.WriteLine(summary);
 
             Device.BeginInvokeOnMainThread(
                 () =>
@@ -165,6 +178,101 @@ namespace NUnit.Runner.ViewModel
 #elif WINDOWS_UWP
             Windows.UI.Xaml.Application.Current.Exit();
 #endif
+        }
+
+        private string _exportStatus;
+        public string ExportStatus
+        {
+            get => _exportStatus;
+            set
+            {
+                _exportStatus = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public async void OnExportResultXml()
+        {
+            //uncomment to see XML value
+            //var temp = _results.GetCustomTestXml();
+            //write to xml file appending device name to file name
+            //string xmlResults = "";
+            try
+            {
+                var result = await WriteCustomXmlResultFile().ConfigureAwait(false);
+                //xmlResults = _results.GetCustomTestXml().ToString();
+                await BlobStorageService.performBlobOperation(result);
+                ExportStatus = "Export Success!";
+                Debug.WriteLine("Export Success!");
+            }
+            catch (Exception)
+            {
+                ExportStatus = "Fatal error while trying to write xml result file!";
+                Debug.WriteLine("Fatal error while trying to write xml result file!");
+                throw;
+            }
+
+            //Upload file to Blob
+
+            /***
+             * UNCOMMENT FOR SANITY CHECK OF FILE EXPORTED
+             *
+             * 
+            var xmlFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "..", "Library");
+            //file name that gets uploaded to Blob storage
+            string xtc_device_platform = DeviceInfo.Platform.ToString();
+            //manufacturer_model
+            string xtc_device_name = DeviceInfo.Manufacturer.ToString() + "_" + DeviceInfo.Model.ToString();
+            //utc datetimenow
+            string dateTimeNow = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+            string fileName = dateTimeNow + "_" + xtc_device_name + "_" + xtc_device_name + ".xml";
+            string custom_xmlfile = Path.Combine(xmlFilePath, fileName);
+
+            string text = File.ReadAllText(custom_xmlfile);
+            Debug.WriteLine("**** FROM XML FILE IN LIBRARY*****");
+            Debug.WriteLine(text);
+            Debug.WriteLine("******");
+
+             *
+             *
+             *
+             * ***/
+
+        }
+
+        async Task<string> WriteCustomXmlResultFile()
+        {
+            var xmlFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "..", "Library");
+            //file name that gets uploaded to Blob storage
+            string xtc_device_platform = DeviceInfo.Platform.ToString();
+            //manufacturer_model
+            string device_manufacturer = DeviceInfo.Manufacturer.ToString();
+            string trim_device_manufacturer = String.Concat(device_manufacturer.Where(c => !Char.IsWhiteSpace(c)));
+            string device_model = DeviceInfo.Model.ToString();
+            string trim_device_model = String.Concat(device_model.Where(c => !Char.IsWhiteSpace(c)));
+            string xtc_device_name = trim_device_manufacturer + "_" + trim_device_model;
+            //utc datetimenow
+            string dateTimeNow = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm");
+            //string dateTimeNow = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            string sourceString = AppInfo.Name;
+            string removeString = "-Tests";
+            int index = sourceString.IndexOf(removeString);
+            string xtc_app_name = (index < 0) ? sourceString : sourceString.Remove(index, removeString.Length);
+            string fileName = xtc_device_platform + "-" + xtc_app_name + "_" + dateTimeNow + "_" + xtc_device_name + ".xml";
+            //string fileName = xtc_device_platform + "-" + xtc_app_name + "_" + xtc_device_name + ".xml";
+            string custom_xmlfile = Path.Combine(xmlFilePath, fileName);
+
+            string outputFolderName = Path.GetDirectoryName(custom_xmlfile);
+
+            Directory.CreateDirectory(outputFolderName);
+
+            using (var resultFileStream = new StreamWriter(custom_xmlfile, false))
+            {
+                var xml = _results.GetCustomTestXml().ToString();
+                await resultFileStream.WriteAsync(xml);
+            }
+
+            return custom_xmlfile;
         }
     }
 }
